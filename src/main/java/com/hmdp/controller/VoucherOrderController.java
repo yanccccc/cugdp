@@ -26,6 +26,18 @@ public class VoucherOrderController {
     private IVoucherOrderService voucherOrderService;
     @PostMapping("seckill/{id}")
     public Result seckillVoucher(@PathVariable("id") Long voucherId) {
+        // 悲观锁实现一人多单的超卖问题
+        // synchronized和Transactional一起用还是会导致超卖问题
+        //Result res = Result.ok();
+        //try {
+        //    synchronized (this){
+        //        res = voucherOrderService.seckillVoucher(voucherId);
+        //    }
+        //}catch (Exception e){
+        //    e.printStackTrace();
+        //}
+        //return res;
+        // 乐观锁解决一人多单的超卖问题
         return voucherOrderService.seckillVoucher(voucherId);
     }
 }
