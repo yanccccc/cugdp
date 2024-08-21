@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.extra.spring.SpringUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
@@ -9,6 +10,8 @@ import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
+import org.springframework.aop.framework.AopContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,11 +35,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private RedisIdWorker redisIdWorker;
+    @Autowired
+    private SpringUtil springUtil;
 
 
     // 秒杀优惠卷
     @Override
-    @Transactional
     public Result seckillVoucher(Long voucherId) {
         // 查询数据库中是否有这个秒杀券
         SeckillVoucher seckillVoucher = seckillVoucherService.getById(voucherId);
@@ -56,11 +60,32 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (seckillVoucher.getStock() < 1) {
             return Result.fail("优惠券库存不足");
         }
+        Long id = UserHolder.getUser().getId();
+        // 悲观锁解决一人一单问题
+        // 因为这是插入数据不是修改数据，所以要使用悲观锁解决
+        synchronized (id.toString().intern()){
+            // 由于这里是this.createVoucherOrder也就是这个类调用内部的方法，spring的事务会失效
+            return SpringUtil.getBean(IVoucherOrderService.class).createVoucherOrder(voucherId);
+            // 也可以这样
+            // IVoucherOrderService iVoucherOrderService = (IVoucherOrderService) AopContext.currentProxy();
+            // return iVoucherOrderService.createVoucherOrder(voucherId);
+        }
+    }
+
+    @Transactional
+    public Result createVoucherOrder(Long voucherId){
+        // 一人一单，数据库里面user_id和voucher_id组合只能有一条数据
+        Long id = UserHolder.getUser().getId();
+        int count = query().eq("user_id", id).eq("voucher_id", voucherId).count();
+        if (count > 0){
+            return Result.fail("一人只允许抢一张券");
+        }
+
         // 开始扣减库存
         //乐观锁解决超卖问题
         boolean success = seckillVoucherService.update()
                 .setSql("stock = stock - 1")
-                .eq("voucher_id", seckillVoucher.getVoucherId())
+                .eq("voucher_id", voucherId)
                 .gt("stock", 0)
                 .update();
         if (!success) {
@@ -68,8 +93,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         // 新建订单
         VoucherOrder voucherOrder = new VoucherOrder();
-        voucherOrder.setUserId(UserHolder.getUser().getId());
-        voucherOrder.setVoucherId(seckillVoucher.getVoucherId());
+        voucherOrder.setUserId(id);
+        voucherOrder.setVoucherId(voucherId);
         // 订单id生成
         long orderId = redisIdWorker.nextId("order");
         voucherOrder.setId(orderId);
