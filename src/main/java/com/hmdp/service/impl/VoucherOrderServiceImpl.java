@@ -9,9 +9,11 @@ import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,9 +37,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private RedisIdWorker redisIdWorker;
-    @Autowired
-    private SpringUtil springUtil;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     // 秒杀优惠卷
     @Override
@@ -61,7 +63,24 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("优惠券库存不足");
         }
         Long id = UserHolder.getUser().getId();
-        // 悲观锁解决一人一单问题
+
+        // 判断是否获取到锁
+        SimpleRedisLock redisLock = new SimpleRedisLock(stringRedisTemplate, "order:" + id);
+        boolean success = redisLock.tryLock(1200L);
+        if (!success){
+            // 没有获取到则直接返回
+            return Result.fail("一人只允许抢一张券");
+        }
+        //
+        try {
+            return SpringUtil.getBean(IVoucherOrderService.class).createVoucherOrder(voucherId);
+        } finally {
+            // 释放锁
+            redisLock.unlock();
+        }
+
+
+        /*// 悲观锁解决一人一单问题，在集群模式下还是会有问题，用上面redis的分布式锁可以解决
         // 因为这是插入数据不是修改数据，所以要使用悲观锁解决
         synchronized (id.toString().intern()){
             // 由于这里是this.createVoucherOrder也就是这个类调用内部的方法，spring的事务会失效
@@ -69,7 +88,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             // 也可以这样
             // IVoucherOrderService iVoucherOrderService = (IVoucherOrderService) AopContext.currentProxy();
             // return iVoucherOrderService.createVoucherOrder(voucherId);
-        }
+        }*/
     }
 
     @Transactional
