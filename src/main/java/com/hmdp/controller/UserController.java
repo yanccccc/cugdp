@@ -80,4 +80,16 @@ public class UserController {
         // 返回
         return Result.ok(info);
     }
+
+    // 用户签到功能，使用bitmap实现
+    @PostMapping("/sign")
+    public Result sign(){
+        return userService.sign();
+    }
+
+    //计算当月用户连续签到的天数
+    @GetMapping("/sign/count")
+    public Result signCount(){
+        return userService.signCount();
+    }
 }

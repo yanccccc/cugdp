@@ -12,17 +12,22 @@ import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RegexUtils;
+import com.hmdp.utils.UserHolder;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.RedisKeyValueTemplate;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import javax.servlet.http.HttpSession;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -101,6 +106,60 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         stringRedisTemplate.expire(LOGIN_USER_KEY + token,LOGIN_USER_TTL,TimeUnit.SECONDS);
         // 返回token
         return Result.ok(token);
+    }
+
+
+    // 用户签到功能
+    @Override
+    public Result sign() {
+        // 获取用户id
+        Long userId = UserHolder.getUser().getId();
+        // 获取当前日期
+        LocalDateTime now = LocalDateTime.now();
+        String formatDate = now.format(DateTimeFormatter.ofPattern(":yyyy:MM"));
+        // 用户id和当前id组合成key，例如id为1010，当前日期为2024/9，组合成1010:2024:09
+        String key = USER_SIGN_KEY + userId + formatDate;
+        // 计算当前日期距离月初有几天
+        int dayOfMonth = now.getDayOfMonth();
+        // 存入bitmap中
+        stringRedisTemplate.opsForValue().setBit(key,dayOfMonth - 1,true);
+        return Result.ok();
+    }
+
+    // 计算用户当月连续签到的天数
+    // 计算规则是从bitmap取出的数据，从当前天数算起，从后往前算起直到遇到0也就是未签到的天数为止
+    // 例如0110011100111 从后往前数就是3天
+    @Override
+    public Result signCount() {
+        // 获取用户id
+        Long userId = UserHolder.getUser().getId();
+        // 获取当前日期
+        LocalDateTime now = LocalDateTime.now();
+        String formatDate = now.format(DateTimeFormatter.ofPattern(":yyyy:MM"));
+        // 用户id和当前id组合成key，例如id为1010，当前日期为2024/9，组合成1010:2024:09
+        String key = USER_SIGN_KEY + userId + formatDate;
+        // 计算当前日期距离月初有几天
+        int dayOfMonth = now.getDayOfMonth();
+        // 取出bitmap中存储的数据 BITFIELD key GET u[dayOfMonth] 0
+        List<Long> result = stringRedisTemplate.opsForValue().bitField(key,
+                BitFieldSubCommands.create().
+                        get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0));
+        if (result == null || result.isEmpty()){
+            return Result.ok(0);
+        }
+        Long num = result.get(0);
+        if (num == null || num == 0){
+            return Result.ok(0);
+        }
+        // 取num和1进行与运算，每次得到的就是最后一位是否签到
+        // 是1则代表签到，是0则代表没有签到
+        int count = 0;
+        while ((num & 1) == 1){
+            count++;
+            // 无符号右移一位，每次都能得到最后一位
+            num >>>= 1;
+        }
+        return Result.ok(count);
     }
 
     private User createUserWithPhone(String phone) {

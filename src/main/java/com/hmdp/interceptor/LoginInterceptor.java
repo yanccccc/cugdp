@@ -10,6 +10,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import java.io.PrintWriter;
 import java.util.Map;
 
 /**
@@ -26,6 +27,10 @@ public class LoginInterceptor implements HandlerInterceptor {
         if (user == null){
             // 无权限，未登录
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setCharacterEncoding("UTF-8");
+            response.setContentType("text/html; charset=UTF-8");
+            PrintWriter writer = response.getWriter();
+            writer.write("您的账号权限已经过期，请重新登录");
             return false;
         }
         //放行
